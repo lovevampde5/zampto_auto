@@ -149,8 +149,8 @@ def dismiss_all_popups(page):
             var ariaClose = document.querySelector('button[aria-label="Close"], button[aria-label="close"], [aria-label="Dismiss"]');
             if (ariaClose) { ariaClose.click(); count++; }
 
-            // ③ GDPR：Nicht einwilligen / Decline / Reject
-            var gdprTexts = ['Nicht einwilligen', 'Decline', 'Reject'];
+            // ③ GDPR：Nicht einwilligen / Decline / Reject / Do not consent
+            var gdprTexts = ['Nicht einwilligen', 'Decline', 'Reject', 'Do not consent'];
             for (var gt of gdprTexts) {
                 var gb = Array.from(document.querySelectorAll('button')).find(b => b.innerText.trim() === gt);
                 if (gb) { gb.click(); count++; break; }
@@ -376,6 +376,9 @@ def start_server(page) -> bool:
     take_screenshot(page, "03_console_page")
 
     try:
+        # ✅ 先关弹窗再找 Start 按钮，防止弹窗拦截点击
+        dismiss_all_popups(page)
+        time.sleep(1)
         start_btn = page.locator('button:has-text("Start")').first
         if start_btn.is_visible(timeout=5000):
             start_btn.click()
@@ -402,6 +405,9 @@ def start_server(page) -> bool:
         try:
             page.reload(timeout=20000, wait_until="domcontentloaded")
             time.sleep(3)
+            # ✅ 关掉弹窗再读状态，防止 GDPR 弹窗遮挡状态文字
+            dismiss_all_popups(page)
+            time.sleep(1)
             body = get_text(page)
             # 优先匹配状态指示器文字
             if "Running" in body:
