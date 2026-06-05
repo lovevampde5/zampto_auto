@@ -1,14 +1,18 @@
-name: 🚨 Zampto 服务器离线紧急启动（Uptime Kuma 触发）
+name: 🔄 Zampto 自动续期 & 状态监控
 
 on:
-  repository_dispatch:
-    types: [server-down]   # Uptime Kuma Webhook Body 里的 event_type
-  workflow_dispatch:        # 保留手动触发入口，方便测试
+  schedule:
+    - cron: '0 0 * * *'   # 每天北京时间 08:00（UTC 00:00）
+  workflow_dispatch:
     inputs:
-      reason:
-        description: '手动触发原因'
+      force_renew:
+        description: '强制续期（忽略剩余天数）'
         required: false
-        default: '手动测试'
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
       enable_recording:
         description: '录屏（true=录屏，false=不录屏）'
         required: false
@@ -19,10 +23,10 @@ on:
           - 'true'
 
 jobs:
-  restart:
-    name: 紧急启动服务器
+  zampto-auto:
+    name: 检查状态 / 自动续期
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
       - name: 检出代码
@@ -59,21 +63,16 @@ jobs:
           ./hysteria client -c config.json &
           sleep 5
           echo "直连 IP：$(curl -s --max-time 5 ifconfig.me || echo '失败')"
-          echo "代理 IP：$(curl -s --max-time 10 --socks5 127.0.0.1:1080 ifconfig.me || echo '代理失败')"
+          echo "代理 IP：$(curl -s --max-time 10 --socks5 127.0.0.1:1080 ifconfig.me || echo '代理失败，请检查 HY2_CONFIG')"
 
-      - name: 打印触发原因
-        run: echo "触发原因：${{ github.event.client_payload.reason || github.event.inputs.reason || 'Uptime Kuma 检测到离线' }}"
-
-      - name: 运行启动脚本（跳过续期，只做启动）
+      - name: 运行续期脚本
         env:
           ZAMPTO_USERNAME:  ${{ secrets.ZAMPTO_USERNAME }}
           ZAMPTO_PASSWORD:  ${{ secrets.ZAMPTO_PASSWORD }}
           ZAMPTO_SERVER_ID: ${{ secrets.ZAMPTO_SERVER_ID }}
           WXPUSHER_TOKEN:   ${{ secrets.WXPUSHER_TOKEN }}
           WXPUSHER_UID:     ${{ secrets.WXPUSHER_UID }}
-          SKIP_RENEW:       "true"
-          UPTIME_STATUS:    ${{ github.event.client_payload.status }}
-          UPTIME_HEARTBEAT: ${{ toJson(github.event.client_payload.heartbeat) }}
+          FORCE_RENEW:      ${{ github.event.inputs.force_renew || 'false' }}
           ENABLE_RECORDING: ${{ github.event.inputs.enable_recording || 'false' }}
           DISPLAY:          ":99"
           LIBGL_ALWAYS_SOFTWARE: "1"
@@ -108,7 +107,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: emergency-${{ github.run_number }}
+          name: debug-${{ github.run_number }}
           path: |
             ./screenshots/*.png
             ${{ github.event.inputs.enable_recording == 'true' && '/tmp/recording.mp4' || '' }}
@@ -116,7 +115,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 3
 
-      - name: 清理旧运行记录（只保留最新 3 条）
+      - name: 清理旧运行记录（只保留最新 1 条）
         if: always()
         uses: Mattraks/delete-workflow-runs@v2
         with:
@@ -124,4 +123,4 @@ jobs:
           repository: ${{ github.repository }}
           delete_workflow_pattern: ${{ github.workflow }}
           retain_days: 0
-          keep_minimum_runs: 3
+          keep_minimum_runs: 1
