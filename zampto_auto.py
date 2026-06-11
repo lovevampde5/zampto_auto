@@ -50,10 +50,49 @@ def wxpush(content: str):
         log.warning(f"📨 WxPusher 推送异常: {e}")
 
 # ---------- 工具函数 ----------
+def redact_sensitive_info(page):
+    """
+    截图前用 JS 将页面上的敏感信息替换为 ***，
+    避免账号、邮箱、服务器地址等出现在截图文件中。
+    覆盖范围：
+      - 首页 info-card 里的 username / user_id / email 文本
+      - Console 页的服务器地址（#addressValue）
+    """
+    try:
+        page.evaluate("""() => {
+            // ── 1. 首页 user-info-grid 里的三张 info-card ──────────────────
+            // 结构: div.user-info-grid > div.info-card > div.info-content > p
+            var cards = document.querySelectorAll('.user-info-grid .info-card .info-content');
+            cards.forEach(function(card) {
+                // <p> 直接子节点（username / user_id 值）
+                var p = card.querySelector('p');
+                if (p) p.textContent = '***';
+                // email 用了 <p style="font-size:...">
+                var pStyle = card.querySelector('p[style]');
+                if (pStyle) pStyle.textContent = '***';
+            });
+
+            // ── 2. Console 页服务器地址 ──────────────────────────────────
+            // <div class="info-card-value" id="addressValue">node11.zampto.net:40114</div>
+            var addrEl = document.getElementById('addressValue');
+            if (addrEl) addrEl.textContent = '***';
+
+            // 同时覆盖所有可能含地址的 .info-card-value（防止多个地址字段）
+            document.querySelectorAll('.info-card-value').forEach(function(el) {
+                if (/\\.zampto\\.net/.test(el.textContent)) {
+                    el.textContent = '***';
+                }
+            });
+        }""")
+    except Exception as e:
+        log.warning(f"脱敏 JS 执行失败（不影响截图）: {e}")
+
+
 def take_screenshot(page, name):
     try:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         path = str(SCREENSHOT_DIR / f"{ts}_{name}.png")
+        redact_sensitive_info(page)   # 截图前先脱敏
         page.screenshot(path=path, full_page=False)
         log.info(f"📸 截图: {path}")
     except Exception as e:
