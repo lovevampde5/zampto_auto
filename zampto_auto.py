@@ -714,7 +714,14 @@ def renew_server(page, server_id: str, expiry_before: str) -> bool:
         dismiss_all_popups(page)
         time.sleep(1)
     except Exception as e:
-        log.warning(f"续期后刷新页面失败: {e}")
+        log.warning(f"续期后刷新页面失败: {e}，改用 goto 重新导航...")
+        try:
+            page.goto(f"{BASE_URL}/server?id={server_id}", timeout=30000, wait_until="domcontentloaded")
+            time.sleep(3)
+            dismiss_all_popups(page)
+            time.sleep(1)
+        except Exception as e2:
+            log.warning(f"续期后重新导航也失败: {e2}")
 
     # ✅ 用 expiry 是否增加来判断是否真正续期成功，不依赖弹窗状态
     info_after = page.evaluate("""() => {
@@ -729,8 +736,10 @@ def renew_server(page, server_id: str, expiry_before: str) -> bool:
 
     log.info(f"续期前 expiry 分钟数: {minutes_before}, 续期后: {minutes_after}")
 
-    # 成功条件：续期后分钟数 > 续期前分钟数（时间增加了说明续期生效）
-    if minutes_after > minutes_before:
+    # 成功条件：
+    # 1. 续期后分钟数 > 续期前（普通情况，时间增加）
+    # 2. 续期前是 Expired（-1），续期后读到有效时间（>0）
+    if minutes_after > 0 and (minutes_after > minutes_before or minutes_before <= 0):
         log.info(f"✅ 续期成功！expiry: {expiry_before} → {info_after}（增加了 {minutes_after - minutes_before} 分钟）")
         return True
 
@@ -776,7 +785,23 @@ def main():
 
         log.info(f"服务器状态: {status} | 到期: {expiry}")
 
-        # 4. 如果服务器已停止，先启动
+        # 4. 续期（SKIP_RENEW=true 时跳过，只做启动）
+        if SKIP_RENEW:
+            log.info("⏭️ SKIP_RENEW=true，跳过续期步骤（Uptime Kuma 紧急启动模式）")
+            renewed = False
+        else:
+            renewed = renew_server(page, SERVER_ID, expiry_before=expiry)
+
+        # 5. 续期后重新读取最新 expiry 和 lastRenewed
+        new_expiry = expiry
+        if renewed:
+            time.sleep(3)
+            info2 = get_server_info(page, SERVER_ID)
+            new_expiry = info2.get("expiry") or expiry
+            last_renew = info2.get("lastRenewed") or last_renew
+            log.info(f"续期后到期信息: {new_expiry}")
+
+        # 6. 如果服务器已停止，再启动
         started = False
         if "stopped" in status.lower() or "offline" in status.lower():
             log.info("🔴 服务器已停止，尝试启动...")
@@ -787,21 +812,6 @@ def main():
             else:
                 status = "Start Failed / Timeout"
                 log.warning("⚠️ 服务器启动失败或超时，未能确认 Running")
-
-        # 5. 续期（SKIP_RENEW=true 时跳过，只做启动）
-        if SKIP_RENEW:
-            log.info("⏭️ SKIP_RENEW=true，跳过续期步骤（Uptime Kuma 紧急启动模式）")
-            renewed = False
-        else:
-            renewed = renew_server(page, SERVER_ID, expiry_before=expiry)
-
-        # 6. 续期后重新读取最新 expiry
-        new_expiry = expiry
-        if renewed:
-            time.sleep(3)
-            info2 = get_server_info(page, SERVER_ID)
-            new_expiry = info2.get("expiry") or expiry
-            log.info(f"续期后到期信息: {new_expiry}")
 
         # 7. 推送
         lines = ["🚨 Zampto 紧急启动报告" if SKIP_RENEW else "🖥️ Zampto 服务器日报"]
