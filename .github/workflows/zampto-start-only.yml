@@ -1,0 +1,126 @@
+name: 🚨 Zampto 服务器离线紧急启动（Uptime Kuma 触发）
+
+on:
+  repository_dispatch:
+    types: [server-down]   # Uptime Kuma Webhook Body 里的 event_type
+  workflow_dispatch:        # 保留手动触发入口，方便测试
+    inputs:
+      reason:
+        description: '手动触发原因'
+        required: false
+        default: '手动测试'
+      enable_recording:
+        description: '录屏（true=录屏，false=不录屏）'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+
+jobs:
+  restart:
+    name: 紧急启动服务器
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 安装系统依赖
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            xvfb ffmpeg curl unzip \
+            fonts-noto-cjk \
+            libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
+            libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 \
+            libxfixes3 libxrandr2 libgbm1 \
+            libasound2t64 || sudo apt-get install -y -qq libasound2
+
+      - name: 安装 Python 依赖
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      - name: 启动 Hysteria2 代理 (绕过 GitHub 节点 IP 限制)
+        env:
+          HY2_CONFIG: ${{ secrets.HY2_CONFIG }}
+        run: |
+          if [ -z "$HY2_CONFIG" ]; then
+            echo "⚠️ 未配置 HY2_CONFIG，将直接使用 GitHub 默认网络运行（可能触发风控/CF拦截）"
+          else
+            echo "📥 下载 Hysteria2 客户端..."
+            curl -L -s -o hy2 https://github.com/apernet/hysteria/releases/latest/download/hysteria-linux-amd64
+            chmod +x hy2
+            echo "$HY2_CONFIG" > hy2_config.json
+            echo "🚀 启动 Hysteria2 核心并映射到本地 SOCKS5 1080 端口..."
+            ./hy2 -c hy2_config.json client > /tmp/hy2.log 2>&1 &
+            sleep 4
+            if ps aux | grep -v grep | grep -q "./hy2"; then
+              echo "✅ Hysteria2 代理启动成功"
+            else
+              echo "❌ Hysteria2 启动失败，日志输出如下："
+              cat /tmp/hy2.log
+              exit 1
+            fi
+          fi
+
+      - name: 运行启动脚本（跳过续期，只做启动）
+        env:
+          ZAMPTO_USERNAME:  ${{ secrets.ZAMPTO_USERNAME }}
+          ZAMPTO_PASSWORD:  ${{ secrets.ZAMPTO_PASSWORD }}
+          ZAMPTO_SERVER_ID: ${{ secrets.ZAMPTO_SERVER_ID }}
+          WXPUSHER_TOKEN:   ${{ secrets.WXPUSHER_TOKEN }}
+          WXPUSHER_UID:     ${{ secrets.WXPUSHER_UID }}
+          # ==== 新增 Telegram 秘钥配置 ====
+          TG_BOT_TOKEN:     ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID:       ${{ secrets.TG_CHAT_ID }}
+          # ==============================
+          SKIP_RENEW:       "true"
+          UPTIME_STATUS:    ${{ github.event.client_payload.status }}
+          ENABLE_RECORDING: ${{ github.event.inputs.enable_recording || 'false' }}
+          DISPLAY:          ":99"
+          LIBGL_ALWAYS_SOFTWARE: "1"
+          GALLIUM_DRIVER:   "llvmpipe"
+        run: |
+          Xvfb :99 -screen 0 1280x720x24 -ac +extension GLX +render -noreset > /dev/null 2>&1 &
+          XVFB_PID=$!
+          sleep 2
+
+          RECORD_PID=""
+          if [ "$ENABLE_RECORDING" = "true" ]; then
+            echo "🎬 录屏已启用"
+            ffmpeg -f x11grab -video_size 1280x720 -framerate 10 -i :99 \
+              -codec:v libx264 -preset ultrafast -crf 30 \
+              -pix_fmt yuv420p -movflags +faststart /tmp/recording.mp4 \
+              > /tmp/ffmpeg.log 2>&1 &
+            RECORD_PID=$!
+            sleep 2
+          else
+            echo "🎬 录屏未启用（如需录屏，手动触发时选择 enable_recording=true）"
+          fi
+
+          timeout 600 python zampto_auto.py || echo "脚本退出码: $?"
+
+          sleep 2
+          [ -n "$RECORD_PID" ] && kill $RECORD_PID 2>/dev/null || true
+          [ -n "$RECORD_PID" ] && wait $RECORD_PID 2>/dev/null || true
+          kill $XVFB_PID 2>/dev/null || true
+
+      - name: 上传截图和录屏
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: emergency-${{ github.run_number }}
+          path: |
+            ./screenshots/*.png
+            ${{ github.event.inputs.enable_recording == 'true' && '/tmp/recording.mp4' || '' }}
+            ${{ github.event.inputs.enable_recording == 'true' && '/tmp/ffmpeg.log' || '' }}
+          if-no-files-found: ignore
