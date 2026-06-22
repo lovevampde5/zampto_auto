@@ -1,4 +1,4 @@
-name: 🔄 My Zampto 自动续期 & 状态监控
+name: 🔄 Zampto 自动续期 & 状态监控
 
 on:
   schedule:
