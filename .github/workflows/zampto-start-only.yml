@@ -1,4 +1,4 @@
-name: 🚨 My Zampto 服务器离线紧急启动（Uptime Kuma 触发）
+name: 🚨 My 1 Zampto 服务器离线紧急启动（Uptime Kuma 触发）
 
 on:
   repository_dispatch:
