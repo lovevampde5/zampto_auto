@@ -18,7 +18,7 @@ SKIP_RENEW     = os.environ.get("SKIP_RENEW", "false").lower() == "true"
 TG_BOT_TOKEN   = os.environ.get("TG_BOT_TOKEN", "")
 TG_CHAT_ID     = os.environ.get("TG_CHAT_ID", "")
 
-BASE_URL    = "https://dash.zampto.net"
+BASE_URL    = "https://dash.zampto.net/auth/login"
 AUTH_URL    = "https://dash.zampto.net/auth/login"
 SERVERS_URL = f"{BASE_URL}/servers"
 
