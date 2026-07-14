@@ -19,7 +19,7 @@ TG_BOT_TOKEN   = os.environ.get("TG_BOT_TOKEN", "")
 TG_CHAT_ID     = os.environ.get("TG_CHAT_ID", "")
 
 BASE_URL    = "https://dash.zampto.net"
-AUTH_URL    = "https://auth.zampto.net/sign-in"
+AUTH_URL    = "https://dash.zampto.net/auth/login"
 SERVERS_URL = f"{BASE_URL}/servers"
 
 SCREENSHOT_DIR = Path("./screenshots")
